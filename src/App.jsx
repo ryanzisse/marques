@@ -1,8 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import {
   Plus, Search, Phone, MapPin, X, Trash2, Pencil, Clock,
   Receipt, TrendingUp, Wallet, Banknote, Printer, ArrowLeft, Check
 } from 'lucide-react';
+
+// --- Configuração do Supabase ---
+const supabaseUrl = 'https://upzfrborwyfvknmvscha.supabase.co';
+const supabaseKey = 'sb_publishable_54hqQTAhhwWf2F-7P5I_XA_ZV5gYz7f';
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 const PAYMENT_METHODS = ['Dinheiro', 'PIX', 'Cartão de Crédito', 'Cartão de Débito', 'Boleto', 'Transferência'];
 
@@ -24,8 +30,6 @@ const COLORS = {
 const currency = (n) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(n) || 0);
 
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-
 const emptyForm = () => ({
   nome: '',
   telefone: '',
@@ -35,6 +39,33 @@ const emptyForm = () => ({
   formaPagamento: PAYMENT_METHODS[0],
   data: new Date().toISOString().slice(0, 10),
 });
+
+// Converte do formato do banco (snake_case) pro formato usado no app (camelCase)
+function fromDb(row) {
+  return {
+    id: row.id,
+    nome: row.nome,
+    telefone: row.telefone || '',
+    endereco: row.endereco || '',
+    valorVenda: row.valor_venda,
+    valorPago: row.valor_pago,
+    formaPagamento: row.forma_pagamento,
+    data: row.data,
+  };
+}
+
+// Converte do formato do app pro formato do banco
+function toDb(sale) {
+  return {
+    nome: sale.nome,
+    telefone: sale.telefone,
+    endereco: sale.endereco,
+    valor_venda: sale.valorVenda,
+    valor_pago: sale.valorPago,
+    forma_pagamento: sale.formaPagamento,
+    data: sale.data,
+  };
+}
 
 function statusOf(sale) {
   const venda = Number(sale.valorVenda) || 0;
@@ -57,28 +88,23 @@ export default function App() {
   const [showReport, setShowReport] = useState(false);
   const [saveError, setSaveError] = useState('');
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await window.storage.get('vendas', false);
-        if (res && res.value) setSales(JSON.parse(res.value));
-      } catch (e) {
-        // sem dados salvos ainda
-      }
-      setLoaded(true);
-    })();
+  const loadSales = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('vendas')
+      .select('*')
+      .order('data', { ascending: false });
+    if (error) {
+      setSaveError('Não foi possível carregar as vendas: ' + error.message);
+    } else {
+      setSales(data.map(fromDb));
+      setSaveError('');
+    }
+    setLoaded(true);
   }, []);
 
-  const persist = useCallback(async (next) => {
-    setSales(next);
-    try {
-      const result = await window.storage.set('vendas', JSON.stringify(next), false);
-      if (!result) setSaveError('Não foi possível salvar. Tente novamente.');
-      else setSaveError('');
-    } catch (e) {
-      setSaveError('Não foi possível salvar. Tente novamente.');
-    }
-  }, []);
+  useEffect(() => {
+    loadSales();
+  }, [loadSales]);
 
   const totals = useMemo(() => {
     let totalVendas = 0, totalRecebido = 0;
@@ -98,7 +124,7 @@ export default function App() {
       : sales.filter((s) =>
           s.nome.toLowerCase().includes(q) || (s.telefone || '').toLowerCase().includes(q)
         );
-    return [...list].sort((a, b) => (b.data || '').localeCompare(a.data || '') || b.id.localeCompare(a.id));
+    return [...list].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
   }, [sales, query]);
 
   function openNewForm() {
@@ -129,7 +155,7 @@ export default function App() {
     setFormError('');
   }
 
-  function submitForm(e) {
+  async function submitForm(e) {
     e.preventDefault();
     const nome = form.nome.trim();
     const venda = parseFloat(form.valorVenda);
@@ -141,7 +167,6 @@ export default function App() {
     if (pagoRaw > venda) return setFormError('O valor pago não pode ser maior que o valor da venda.');
 
     const record = {
-      id: editingId || uid(),
       nome,
       telefone: form.telefone.trim(),
       endereco: form.endereco.trim(),
@@ -152,30 +177,45 @@ export default function App() {
     };
 
     if (editingId) {
-      persist(sales.map((s) => (s.id === editingId ? record : s)));
+      const { error } = await supabase.from('vendas').update(toDb(record)).eq('id', editingId);
+      if (error) return setFormError('Erro ao salvar: ' + error.message);
     } else {
-      persist([record, ...sales]);
+      const { error } = await supabase.from('vendas').insert(toDb(record));
+      if (error) return setFormError('Erro ao salvar: ' + error.message);
     }
+
+    await loadSales();
     closeForm();
   }
 
-  function removeSale(id) {
-    persist(sales.filter((s) => s.id !== id));
+  async function removeSale(id) {
+    const { error } = await supabase.from('vendas').delete().eq('id', id);
+    if (error) {
+      setSaveError('Erro ao excluir: ' + error.message);
+    } else {
+      await loadSales();
+    }
     setConfirmDeleteId(null);
   }
 
-  function registerPayment(sale) {
+  async function registerPayment(sale) {
     const raw = payInputs[sale.id];
     const valor = parseFloat(raw);
     const venda = Number(sale.valorVenda) || 0;
     const pagoAtual = Number(sale.valorPago) || 0;
-    const restante = venda - pagoAtual;
     if (!raw || isNaN(valor) || valor <= 0) return;
     const novoPago = Math.min(pagoAtual + valor, venda);
-    persist(sales.map((s) => (s.id === sale.id ? { ...s, valorPago: novoPago } : s)));
-    setPayInputs((prev) => ({ ...prev, [sale.id]: '' }));
-    if (valor > restante) {
-      // valor excedente foi limitado ao saldo restante, sem necessidade de aviso bloqueante
+
+    const { error } = await supabase
+      .from('vendas')
+      .update({ valor_pago: novoPago })
+      .eq('id', sale.id);
+
+    if (error) {
+      setSaveError('Erro ao registrar pagamento: ' + error.message);
+    } else {
+      setPayInputs((prev) => ({ ...prev, [sale.id]: '' }));
+      await loadSales();
     }
   }
 
