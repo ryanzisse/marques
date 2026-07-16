@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import {
   Plus, Search, Phone, MapPin, X, Trash2, Pencil, Clock,
-  Receipt, TrendingUp, Wallet, Banknote, Printer, ArrowLeft, Check, Users, ChevronDown, ChevronUp
+  Receipt, TrendingUp, Wallet, Banknote, Printer, ArrowLeft, Check, Users
 } from 'lucide-react';
 import logo from './assets/marqueslogo.png';
 import jsPDF from 'jspdf';
@@ -186,33 +186,6 @@ function statusOf(sale) {
   return { key: 'parcial', label: 'Parcial', color: COLORS.accent, bg: COLORS.accentLight };
 }
 
-// Retorna a data de início do período (ou null para "tudo"), baseada em dias corridos
-function getPeriodStart(period) {
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  if (period === 'semana') {
-    const d = new Date(now);
-    d.setDate(d.getDate() - 6); // últimos 7 dias corridos, incluindo hoje
-    return d;
-  }
-  if (period === 'mes') {
-    const d = new Date(now);
-    d.setDate(d.getDate() - 29); // últimos 30 dias corridos, incluindo hoje
-    return d;
-  }
-  return null;
-}
-
-function filterSalesByPeriod(sales, period) {
-  const start = getPeriodStart(period);
-  if (!start) return sales;
-  return sales.filter((s) => {
-    if (!s.data) return false;
-    const d = new Date(s.data + 'T00:00:00');
-    return d >= start;
-  });
-}
-
 const globalStyles = `
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
   .font-sans { font-family: 'Inter', system-ui, sans-serif; }
@@ -327,7 +300,6 @@ function SellerApp({ sellerId, onBack }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [showReport, setShowReport] = useState(false);
   const [saveError, setSaveError] = useState('');
-  const [showSalesList, setShowSalesList] = useState(false);
 
   const loadSales = useCallback(async () => {
     const { data, error } = await supabase
@@ -478,6 +450,7 @@ function SellerApp({ sellerId, onBack }) {
     return (
       <ReportView
         sales={sales}
+        totals={totals}
         title={`Relatório — ${sellerInfo.label}`}
         onBack={() => setShowReport(false)}
       />
@@ -537,8 +510,22 @@ function SellerApp({ sellerId, onBack }) {
           </div>
         )}
 
-        {/* Ações principais */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        {/* Busca */}
+        <div
+          className="flex items-center gap-2.5 px-4 py-3.5 rounded-2xl mb-4"
+          style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.border}` }}
+        >
+          <Search size={18} style={{ color: COLORS.muted }} />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar cliente ou telefone"
+            className="flex-1 bg-transparent outline-none text-sm"
+          />
+        </div>
+
+        {/* Ações */}
+        <div className="flex flex-col sm:flex-row gap-3 mb-8">
           <button
             onClick={openNewForm}
             className="flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl text-sm font-semibold text-white"
@@ -679,170 +666,139 @@ function SellerApp({ sellerId, onBack }) {
           </form>
         )}
 
-        {/* Alternador — mostrar/ocultar vendas registradas */}
-        <button
-          onClick={() => setShowSalesList((v) => !v)}
-          className="w-full flex items-center justify-between px-5 py-4 rounded-2xl text-sm font-semibold mb-4"
-          style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.border}`, color: COLORS.ink }}
-        >
-          <span className="flex items-center gap-2">
-            <Receipt size={18} style={{ color: COLORS.muted }} />
-            Vendas registradas ({sales.length})
-          </span>
-          {showSalesList ? <ChevronUp size={18} style={{ color: COLORS.muted }} /> : <ChevronDown size={18} style={{ color: COLORS.muted }} />}
-        </button>
-
-        {showSalesList && (
-          <>
-            {/* Busca */}
-            <div
-              className="flex items-center gap-2.5 px-4 py-3.5 rounded-2xl mb-4"
-              style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.border}` }}
-            >
-              <Search size={18} style={{ color: COLORS.muted }} />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Buscar cliente ou telefone"
-                className="flex-1 bg-transparent outline-none text-sm"
-              />
-            </div>
-
-            {/* Lista de vendas */}
-            {loaded && filtered.length === 0 && (
-              <div
-                className="text-center py-16 rounded-2xl"
-                style={{ border: `1px dashed ${COLORS.border}`, color: COLORS.muted }}
-              >
-                <Receipt size={30} className="mx-auto mb-3" style={{ color: COLORS.border }} />
-                <p className="text-sm">
-                  {sales.length === 0 ? 'Nenhuma venda registrada ainda.' : 'Nenhuma venda encontrada.'}
-                </p>
-              </div>
-            )}
-
-            <div className="space-y-4">
-              {filtered.map((sale) => {
-                const venda = Number(sale.valorVenda) || 0;
-                const pago = Math.min(Number(sale.valorPago) || 0, venda);
-                const saldo = venda - pago;
-                const status = statusOf(sale);
-                return (
-                  <div
-                    key={sale.id}
-                    className="p-5 rounded-2xl"
-                    style={{ backgroundColor: COLORS.surface, borderTop: `2px dashed ${COLORS.border}`, border: `1px solid ${COLORS.border}` }}
-                  >
-                    <div className="flex items-start justify-between gap-3 mb-3">
-                      <h3 className="font-display font-semibold text-lg leading-tight">{sale.nome}</h3>
-                      <span
-                        className="text-xs font-semibold uppercase tracking-wider px-2.5 py-1 rounded shrink-0"
-                        style={{ border: `1.5px dashed ${status.color}`, color: status.color, transform: 'rotate(-3deg)' }}
-                      >
-                        {status.label}
-                      </span>
-                    </div>
-
-                    {(sale.telefone || sale.endereco) && (
-                      <div className="mb-4 space-y-1.5">
-                        {sale.telefone && (
-                          <div className="flex items-center gap-2 text-sm" style={{ color: COLORS.muted }}>
-                            <Phone size={14} /> {sale.telefone}
-                          </div>
-                        )}
-                        {sale.endereco && (
-                          <div className="flex items-center gap-2 text-sm" style={{ color: COLORS.muted }}>
-                            <MapPin size={14} /> {sale.endereco}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-3 gap-3 mb-4 font-mono">
-                      <MiniStat label="Venda" value={venda} />
-                      <MiniStat label="Pago" value={pago} color={COLORS.primary} />
-                      <MiniStat label="Saldo" value={saldo} color={saldo > 0 ? COLORS.accent : COLORS.muted} />
-                    </div>
-
-                    <div className="flex items-center justify-between text-xs mb-4" style={{ color: COLORS.muted }}>
-                      <span className="flex items-center gap-1.5">
-                        <Banknote size={14} /> {sale.formaPagamento}
-                      </span>
-                      <span>{sale.data && new Date(sale.data + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
-                    </div>
-
-                    {saldo > 0 && (
-                      <div className="flex flex-col sm:flex-row gap-2.5 mb-4">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={payInputs[sale.id] || ''}
-                          onChange={(e) => setPayInputs((p) => ({ ...p, [sale.id]: e.target.value }))}
-                          placeholder="Registrar novo pagamento"
-                          className="flex-1 px-4 py-2.5 rounded-xl text-sm outline-none font-mono"
-                          style={{ border: `1px solid ${COLORS.border}` }}
-                        />
-                        <input
-                          type="date"
-                          value={payDateInputs[sale.id] || new Date().toISOString().slice(0, 10)}
-                          onChange={(e) => setPayDateInputs((p) => ({ ...p, [sale.id]: e.target.value }))}
-                          className="px-4 py-2.5 rounded-xl text-sm outline-none"
-                          style={{ border: `1px solid ${COLORS.border}` }}
-                        />
-                        <button
-                          onClick={() => registerPayment(sale)}
-                          className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white"
-                          style={{ backgroundColor: COLORS.primaryDark }}
-                        >
-                          <Check size={16} /> Confirmar
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-3 pt-4 flex-wrap" style={{ borderTop: `1px solid ${COLORS.border}` }}>
-                      <button
-                        onClick={() => openEditForm(sale)}
-                        className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg"
-                        style={{ color: COLORS.ink }}
-                      >
-                        <Pencil size={15} /> Editar
-                      </button>
-
-                      <button
-                        onClick={() => gerarReciboPDF(sale, sellerInfo.label)}
-                        className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg"
-                        style={{ color: COLORS.primary }}
-                      >
-                        <Printer size={15} /> Recibo
-                      </button>
-
-                      {confirmDeleteId === sale.id ? (
-                        <div className="flex items-center gap-2.5 ml-auto">
-                          <span className="text-sm" style={{ color: COLORS.muted }}>Excluir?</span>
-                          <button onClick={() => removeSale(sale.id)} className="text-sm font-medium px-3 py-2 rounded-lg text-white" style={{ backgroundColor: COLORS.danger }}>
-                            Sim
-                          </button>
-                          <button onClick={() => setConfirmDeleteId(null)} className="text-sm font-medium px-3 py-2" style={{ color: COLORS.muted }}>
-                            Não
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setConfirmDeleteId(sale.id)}
-                          className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg ml-auto"
-                          style={{ color: COLORS.danger }}
-                        >
-                          <Trash2 size={15} /> Excluir
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
+        {/* Lista de vendas */}
+        {loaded && filtered.length === 0 && (
+          <div
+            className="text-center py-16 rounded-2xl"
+            style={{ border: `1px dashed ${COLORS.border}`, color: COLORS.muted }}
+          >
+            <Receipt size={30} className="mx-auto mb-3" style={{ color: COLORS.border }} />
+            <p className="text-sm">
+              {sales.length === 0 ? 'Nenhuma venda registrada ainda.' : 'Nenhuma venda encontrada.'}
+            </p>
+          </div>
         )}
+
+        <div className="space-y-4">
+          {filtered.map((sale) => {
+            const venda = Number(sale.valorVenda) || 0;
+            const pago = Math.min(Number(sale.valorPago) || 0, venda);
+            const saldo = venda - pago;
+            const status = statusOf(sale);
+            return (
+              <div
+                key={sale.id}
+                className="p-5 rounded-2xl"
+                style={{ backgroundColor: COLORS.surface, borderTop: `2px dashed ${COLORS.border}`, border: `1px solid ${COLORS.border}` }}
+              >
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <h3 className="font-display font-semibold text-lg leading-tight">{sale.nome}</h3>
+                  <span
+                    className="text-xs font-semibold uppercase tracking-wider px-2.5 py-1 rounded shrink-0"
+                    style={{ border: `1.5px dashed ${status.color}`, color: status.color, transform: 'rotate(-3deg)' }}
+                  >
+                    {status.label}
+                  </span>
+                </div>
+
+                {(sale.telefone || sale.endereco) && (
+                  <div className="mb-4 space-y-1.5">
+                    {sale.telefone && (
+                      <div className="flex items-center gap-2 text-sm" style={{ color: COLORS.muted }}>
+                        <Phone size={14} /> {sale.telefone}
+                      </div>
+                    )}
+                    {sale.endereco && (
+                      <div className="flex items-center gap-2 text-sm" style={{ color: COLORS.muted }}>
+                        <MapPin size={14} /> {sale.endereco}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-3 mb-4 font-mono">
+                  <MiniStat label="Venda" value={venda} />
+                  <MiniStat label="Pago" value={pago} color={COLORS.primary} />
+                  <MiniStat label="Saldo" value={saldo} color={saldo > 0 ? COLORS.accent : COLORS.muted} />
+                </div>
+
+                <div className="flex items-center justify-between text-xs mb-4" style={{ color: COLORS.muted }}>
+                  <span className="flex items-center gap-1.5">
+                    <Banknote size={14} /> {sale.formaPagamento}
+                  </span>
+                  <span>{sale.data && new Date(sale.data + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
+                </div>
+
+                {saldo > 0 && (
+                  <div className="flex flex-col sm:flex-row gap-2.5 mb-4">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={payInputs[sale.id] || ''}
+                      onChange={(e) => setPayInputs((p) => ({ ...p, [sale.id]: e.target.value }))}
+                      placeholder="Registrar novo pagamento"
+                      className="flex-1 px-4 py-2.5 rounded-xl text-sm outline-none font-mono"
+                      style={{ border: `1px solid ${COLORS.border}` }}
+                    />
+                    <input
+                      type="date"
+                      value={payDateInputs[sale.id] || new Date().toISOString().slice(0, 10)}
+                      onChange={(e) => setPayDateInputs((p) => ({ ...p, [sale.id]: e.target.value }))}
+                      className="px-4 py-2.5 rounded-xl text-sm outline-none"
+                      style={{ border: `1px solid ${COLORS.border}` }}
+                    />
+                    <button
+                      onClick={() => registerPayment(sale)}
+                      className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white"
+                      style={{ backgroundColor: COLORS.primaryDark }}
+                    >
+                      <Check size={16} /> Confirmar
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3 pt-4 flex-wrap" style={{ borderTop: `1px solid ${COLORS.border}` }}>
+                  <button
+                    onClick={() => openEditForm(sale)}
+                    className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg"
+                    style={{ color: COLORS.ink }}
+                  >
+                    <Pencil size={15} /> Editar
+                  </button>
+
+                  <button
+                    onClick={() => gerarReciboPDF(sale, sellerInfo.label)}
+                    className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg"
+                    style={{ color: COLORS.primary }}
+                  >
+                    <Printer size={15} /> Recibo
+                  </button>
+
+                  {confirmDeleteId === sale.id ? (
+                    <div className="flex items-center gap-2.5 ml-auto">
+                      <span className="text-sm" style={{ color: COLORS.muted }}>Excluir?</span>
+                      <button onClick={() => removeSale(sale.id)} className="text-sm font-medium px-3 py-2 rounded-lg text-white" style={{ backgroundColor: COLORS.danger }}>
+                        Sim
+                      </button>
+                      <button onClick={() => setConfirmDeleteId(null)} className="text-sm font-medium px-3 py-2" style={{ color: COLORS.muted }}>
+                        Não
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDeleteId(sale.id)}
+                      className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg ml-auto"
+                      style={{ color: COLORS.danger }}
+                    >
+                      <Trash2 size={15} /> Excluir
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -1039,30 +995,9 @@ function MiniStat({ label, value, color }) {
   );
 }
 
-function ReportView({ sales, title, onBack }) {
-  const [period, setPeriod] = useState('tudo');
+function ReportView({ sales, totals, title, onBack }) {
   const now = new Date();
-
-  const filteredSales = useMemo(() => filterSalesByPeriod(sales, period), [sales, period]);
-
-  const totals = useMemo(() => {
-    let totalVendas = 0, totalRecebido = 0;
-    filteredSales.forEach((s) => {
-      const venda = Number(s.valorVenda) || 0;
-      const pago = Math.min(Number(s.valorPago) || 0, venda);
-      totalVendas += venda;
-      totalRecebido += pago;
-    });
-    return { totalVendas, totalRecebido, totalAReceber: totalVendas - totalRecebido };
-  }, [filteredSales]);
-
-  const sorted = [...filteredSales].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
-
-  const PERIODS = [
-    { key: 'tudo', label: 'Tudo' },
-    { key: 'semana', label: 'Últimos 7 dias' },
-    { key: 'mes', label: 'Últimos 30 dias' },
-  ];
+  const sorted = [...sales].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
 
   return (
     <div style={{ backgroundColor: '#EDECE6', minHeight: '100vh' }} className="font-mono py-10 px-5">
@@ -1089,24 +1024,6 @@ function ReportView({ sales, title, onBack }) {
         </button>
       </div>
 
-      {/* Filtro de período */}
-      <div className="max-w-sm mx-auto no-print flex gap-2 mb-5">
-        {PERIODS.map((p) => (
-          <button
-            key={p.key}
-            onClick={() => setPeriod(p.key)}
-            className="flex-1 px-3 py-2.5 rounded-lg text-xs font-semibold"
-            style={
-              period === p.key
-                ? { backgroundColor: COLORS.primary, color: '#fff' }
-                : { backgroundColor: COLORS.surface, color: COLORS.muted, border: `1px solid ${COLORS.border}` }
-            }
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
-
       <div
         className="max-w-sm mx-auto p-7"
         style={{ backgroundColor: '#FFFFFF', border: `1px solid ${COLORS.border}` }}
@@ -1116,11 +1033,6 @@ function ReportView({ sales, title, onBack }) {
           <p className="text-xs mt-2" style={{ color: COLORS.muted }}>
             Emitido em {now.toLocaleDateString('pt-BR')} às {now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
           </p>
-          {period !== 'tudo' && (
-            <p className="text-xs mt-1" style={{ color: COLORS.accent }}>
-              Período: {PERIODS.find((p) => p.key === period)?.label}
-            </p>
-          )}
         </div>
 
         <div style={{ borderTop: `1px dashed ${COLORS.border}`, borderBottom: `1px dashed ${COLORS.border}` }} className="py-4 mb-5">
@@ -1136,7 +1048,7 @@ function ReportView({ sales, title, onBack }) {
 
         <div className="space-y-3 mb-5">
           {sorted.length === 0 && (
-            <p className="text-xs" style={{ color: COLORS.muted }}>Nenhuma venda registrada neste período.</p>
+            <p className="text-xs" style={{ color: COLORS.muted }}>Nenhuma venda registrada.</p>
           )}
           {sorted.map((s) => {
             const venda = Number(s.valorVenda) || 0;

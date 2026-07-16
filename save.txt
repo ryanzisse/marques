@@ -2,17 +2,9 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import {
   Plus, Search, Phone, MapPin, X, Trash2, Pencil, Clock,
-  Receipt, TrendingUp, Wallet, Banknote, Printer, ArrowLeft, Check, Users, ChevronDown, ChevronUp
+  Receipt, TrendingUp, Wallet, Banknote, Printer, ArrowLeft, Check, Users
 } from 'lucide-react';
 import logo from './assets/marqueslogo.png';
-import jsPDF from 'jspdf';
-
-// --- Dados da empresa (usados no recibo em PDF) ---
-const COMPANY = {
-  nome: 'MARQUES MÁRMORES E GRANITOS LTDA',
-  cnpj: '60.333.603/0001-37',
-  endereco: 'Rua Orestes Bigossi, nº 44 – Guriri Norte, São Mateus/ES – CEP 29.946-310',
-};
 
 // --- Configuração do Supabase ---
 const supabaseUrl = 'https://upzfrborwyfvknmvscha.supabase.co';
@@ -49,7 +41,6 @@ const emptyForm = () => ({
   nome: '',
   telefone: '',
   endereco: '',
-  orcamento: '',
   valorVenda: '',
   valorPago: '',
   formaPagamento: PAYMENT_METHODS[0],
@@ -63,12 +54,10 @@ function fromDb(row, sellerId) {
     nome: row.nome,
     telefone: row.telefone || '',
     endereco: row.endereco || '',
-    orcamento: row.orcamento || '',
     valorVenda: row.valor_venda,
     valorPago: row.valor_pago,
     formaPagamento: row.forma_pagamento,
     data: row.data,
-    pagamentos: Array.isArray(row.pagamentos) ? row.pagamentos : [],
   };
 }
 
@@ -77,105 +66,11 @@ function toDb(sale) {
     nome: sale.nome,
     telefone: sale.telefone,
     endereco: sale.endereco,
-    orcamento: sale.orcamento || '',
     valor_venda: sale.valorVenda,
     valor_pago: sale.valorPago,
     forma_pagamento: sale.formaPagamento,
     data: sale.data,
   };
-}
-
-function gerarReciboPDF(sale, vendedorLabel) {
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const marginX = 48;
-  let y = 56;
-
-  const venda = Number(sale.valorVenda) || 0;
-  const pago = Number(sale.valorPago) || 0;
-  const saldo = venda - pago;
-
-  // Cabeçalho — dados da empresa
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.text(COMPANY.nome, marginX, y);
-  y += 16;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.text(`CNPJ: ${COMPANY.cnpj}`, marginX, y);
-  y += 13;
-  doc.text(COMPANY.endereco, marginX, y, { maxWidth: pageWidth - marginX * 2 });
-  y += 24;
-
-  doc.setDrawColor(200);
-  doc.line(marginX, y, pageWidth - marginX, y);
-  y += 28;
-
-  // Título
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
-  doc.text('RECIBO DE PAGAMENTO', pageWidth / 2, y, { align: 'center' });
-  y += 30;
-
-  // Dados do cliente / venda
-  doc.setFontSize(10);
-  const linha = (label, value) => {
-    doc.setFont('helvetica', 'bold');
-    doc.text(label, marginX, y);
-    doc.setFont('helvetica', 'normal');
-    doc.text(String(value || '-'), marginX + 120, y);
-    y += 18;
-  };
-
-  linha('Vendedor:', vendedorLabel);
-  linha('Cliente:', sale.nome);
-  linha('Telefone:', sale.telefone);
-  linha('Endereço:', sale.endereco);
-  if (sale.orcamento) linha('Nº Orçamento:', sale.orcamento);
-  linha('Data da venda:', sale.data ? new Date(sale.data + 'T00:00:00').toLocaleDateString('pt-BR') : '-');
-  linha('Forma de pagamento:', sale.formaPagamento);
-
-  y += 10;
-  doc.line(marginX, y, pageWidth - marginX, y);
-  y += 24;
-
-  // Resumo financeiro
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text('RESUMO FINANCEIRO', marginX, y);
-  y += 20;
-  doc.setFontSize(10);
-  linha('Valor da venda:', currency(venda));
-  linha('Total pago:', currency(pago));
-  linha('Saldo restante:', currency(saldo));
-
-  // Histórico de pagamentos
-  const pagamentos = Array.isArray(sale.pagamentos) ? sale.pagamentos : [];
-  if (pagamentos.length > 0) {
-    y += 10;
-    doc.line(marginX, y, pageWidth - marginX, y);
-    y += 24;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.text('HISTÓRICO DE PAGAMENTOS', marginX, y);
-    y += 20;
-    doc.setFontSize(9);
-    pagamentos.forEach((p, i) => {
-      const dataFmt = p.data ? new Date(p.data + 'T00:00:00').toLocaleDateString('pt-BR') : '-';
-      doc.setFont('helvetica', 'normal');
-      doc.text(`${i + 1}. ${dataFmt} — ${currency(p.valor)} (${p.forma || sale.formaPagamento})`, marginX, y);
-      y += 16;
-    });
-  }
-
-  y += 30;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(120);
-  doc.text(`Emitido em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`, marginX, y);
-
-  const nomeArquivo = `recibo-${sale.nome.replace(/\s+/g, '-').toLowerCase()}.pdf`;
-  doc.save(nomeArquivo);
 }
 
 function statusOf(sale) {
@@ -184,33 +79,6 @@ function statusOf(sale) {
   if (pago <= 0) return { key: 'pendente', label: 'Pendente', color: COLORS.danger, bg: COLORS.dangerLight };
   if (pago >= venda) return { key: 'pago', label: 'Pago', color: COLORS.primary, bg: COLORS.primaryLight };
   return { key: 'parcial', label: 'Parcial', color: COLORS.accent, bg: COLORS.accentLight };
-}
-
-// Retorna a data de início do período (ou null para "tudo"), baseada em dias corridos
-function getPeriodStart(period) {
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  if (period === 'semana') {
-    const d = new Date(now);
-    d.setDate(d.getDate() - 6); // últimos 7 dias corridos, incluindo hoje
-    return d;
-  }
-  if (period === 'mes') {
-    const d = new Date(now);
-    d.setDate(d.getDate() - 29); // últimos 30 dias corridos, incluindo hoje
-    return d;
-  }
-  return null;
-}
-
-function filterSalesByPeriod(sales, period) {
-  const start = getPeriodStart(period);
-  if (!start) return sales;
-  return sales.filter((s) => {
-    if (!s.data) return false;
-    const d = new Date(s.data + 'T00:00:00');
-    return d >= start;
-  });
 }
 
 const globalStyles = `
@@ -323,11 +191,9 @@ function SellerApp({ sellerId, onBack }) {
   const [form, setForm] = useState(emptyForm());
   const [formError, setFormError] = useState('');
   const [payInputs, setPayInputs] = useState({});
-  const [payDateInputs, setPayDateInputs] = useState({});
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [showReport, setShowReport] = useState(false);
   const [saveError, setSaveError] = useState('');
-  const [showSalesList, setShowSalesList] = useState(false);
 
   const loadSales = useCallback(async () => {
     const { data, error } = await supabase
@@ -380,7 +246,6 @@ function SellerApp({ sellerId, onBack }) {
       nome: sale.nome,
       telefone: sale.telefone || '',
       endereco: sale.endereco || '',
-      orcamento: sale.orcamento || '',
       valorVenda: String(sale.valorVenda ?? ''),
       valorPago: String(sale.valorPago ?? ''),
       formaPagamento: sale.formaPagamento || PAYMENT_METHODS[0],
@@ -412,7 +277,6 @@ function SellerApp({ sellerId, onBack }) {
       nome,
       telefone: form.telefone.trim(),
       endereco: form.endereco.trim(),
-      orcamento: form.orcamento.trim(),
       valorVenda: venda,
       valorPago: pagoRaw,
       formaPagamento: form.formaPagamento,
@@ -423,13 +287,7 @@ function SellerApp({ sellerId, onBack }) {
       const { error } = await supabase.from(tableName).update(toDb(record)).eq('id', editingId);
       if (error) return setFormError('Erro ao salvar: ' + error.message);
     } else {
-      // Ao criar uma venda nova, se já houver entrada paga, registra no histórico de pagamentos
-      const pagamentosIniciais = pagoRaw > 0
-        ? [{ valor: pagoRaw, data: record.data, forma: form.formaPagamento }]
-        : [];
-      const { error } = await supabase
-        .from(tableName)
-        .insert({ ...toDb(record), pagamentos: pagamentosIniciais });
+      const { error } = await supabase.from(tableName).insert(toDb(record));
       if (error) return setFormError('Erro ao salvar: ' + error.message);
     }
 
@@ -450,26 +308,20 @@ function SellerApp({ sellerId, onBack }) {
   async function registerPayment(sale) {
     const raw = payInputs[sale.id];
     const valor = parseFloat(raw);
-    const dataPagamento = payDateInputs[sale.id] || new Date().toISOString().slice(0, 10);
     const venda = Number(sale.valorVenda) || 0;
     const pagoAtual = Number(sale.valorPago) || 0;
     if (!raw || isNaN(valor) || valor <= 0) return;
     const novoPago = Math.min(pagoAtual + valor, venda);
-    const novoHistorico = [
-      ...(Array.isArray(sale.pagamentos) ? sale.pagamentos : []),
-      { valor, data: dataPagamento, forma: sale.formaPagamento },
-    ];
 
     const { error } = await supabase
       .from(tableName)
-      .update({ valor_pago: novoPago, pagamentos: novoHistorico })
+      .update({ valor_pago: novoPago })
       .eq('id', sale.id);
 
     if (error) {
       setSaveError('Erro ao registrar pagamento: ' + error.message);
     } else {
       setPayInputs((prev) => ({ ...prev, [sale.id]: '' }));
-      setPayDateInputs((prev) => ({ ...prev, [sale.id]: '' }));
       await loadSales();
     }
   }
@@ -478,6 +330,7 @@ function SellerApp({ sellerId, onBack }) {
     return (
       <ReportView
         sales={sales}
+        totals={totals}
         title={`Relatório — ${sellerInfo.label}`}
         onBack={() => setShowReport(false)}
       />
@@ -537,8 +390,22 @@ function SellerApp({ sellerId, onBack }) {
           </div>
         )}
 
-        {/* Ações principais */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        {/* Busca */}
+        <div
+          className="flex items-center gap-2.5 px-4 py-3.5 rounded-2xl mb-4"
+          style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.border}` }}
+        >
+          <Search size={18} style={{ color: COLORS.muted }} />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar cliente ou telefone"
+            className="flex-1 bg-transparent outline-none text-sm"
+          />
+        </div>
+
+        {/* Ações */}
+        <div className="flex flex-col sm:flex-row gap-3 mb-8">
           <button
             onClick={openNewForm}
             className="flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl text-sm font-semibold text-white"
@@ -614,16 +481,6 @@ function SellerApp({ sellerId, onBack }) {
                 />
               </Field>
 
-              <Field label="Número do orçamento">
-                <input
-                  value={form.orcamento}
-                  onChange={(e) => setForm({ ...form, orcamento: e.target.value })}
-                  className="w-full px-4 py-3 rounded-xl text-sm outline-none font-mono"
-                  style={{ border: `1px solid ${COLORS.border}` }}
-                  placeholder="Ex: 0142"
-                />
-              </Field>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <Field label="Valor da venda (R$)">
                   <input
@@ -679,170 +536,124 @@ function SellerApp({ sellerId, onBack }) {
           </form>
         )}
 
-        {/* Alternador — mostrar/ocultar vendas registradas */}
-        <button
-          onClick={() => setShowSalesList((v) => !v)}
-          className="w-full flex items-center justify-between px-5 py-4 rounded-2xl text-sm font-semibold mb-4"
-          style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.border}`, color: COLORS.ink }}
-        >
-          <span className="flex items-center gap-2">
-            <Receipt size={18} style={{ color: COLORS.muted }} />
-            Vendas registradas ({sales.length})
-          </span>
-          {showSalesList ? <ChevronUp size={18} style={{ color: COLORS.muted }} /> : <ChevronDown size={18} style={{ color: COLORS.muted }} />}
-        </button>
-
-        {showSalesList && (
-          <>
-            {/* Busca */}
-            <div
-              className="flex items-center gap-2.5 px-4 py-3.5 rounded-2xl mb-4"
-              style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.border}` }}
-            >
-              <Search size={18} style={{ color: COLORS.muted }} />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Buscar cliente ou telefone"
-                className="flex-1 bg-transparent outline-none text-sm"
-              />
-            </div>
-
-            {/* Lista de vendas */}
-            {loaded && filtered.length === 0 && (
-              <div
-                className="text-center py-16 rounded-2xl"
-                style={{ border: `1px dashed ${COLORS.border}`, color: COLORS.muted }}
-              >
-                <Receipt size={30} className="mx-auto mb-3" style={{ color: COLORS.border }} />
-                <p className="text-sm">
-                  {sales.length === 0 ? 'Nenhuma venda registrada ainda.' : 'Nenhuma venda encontrada.'}
-                </p>
-              </div>
-            )}
-
-            <div className="space-y-4">
-              {filtered.map((sale) => {
-                const venda = Number(sale.valorVenda) || 0;
-                const pago = Math.min(Number(sale.valorPago) || 0, venda);
-                const saldo = venda - pago;
-                const status = statusOf(sale);
-                return (
-                  <div
-                    key={sale.id}
-                    className="p-5 rounded-2xl"
-                    style={{ backgroundColor: COLORS.surface, borderTop: `2px dashed ${COLORS.border}`, border: `1px solid ${COLORS.border}` }}
-                  >
-                    <div className="flex items-start justify-between gap-3 mb-3">
-                      <h3 className="font-display font-semibold text-lg leading-tight">{sale.nome}</h3>
-                      <span
-                        className="text-xs font-semibold uppercase tracking-wider px-2.5 py-1 rounded shrink-0"
-                        style={{ border: `1.5px dashed ${status.color}`, color: status.color, transform: 'rotate(-3deg)' }}
-                      >
-                        {status.label}
-                      </span>
-                    </div>
-
-                    {(sale.telefone || sale.endereco) && (
-                      <div className="mb-4 space-y-1.5">
-                        {sale.telefone && (
-                          <div className="flex items-center gap-2 text-sm" style={{ color: COLORS.muted }}>
-                            <Phone size={14} /> {sale.telefone}
-                          </div>
-                        )}
-                        {sale.endereco && (
-                          <div className="flex items-center gap-2 text-sm" style={{ color: COLORS.muted }}>
-                            <MapPin size={14} /> {sale.endereco}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-3 gap-3 mb-4 font-mono">
-                      <MiniStat label="Venda" value={venda} />
-                      <MiniStat label="Pago" value={pago} color={COLORS.primary} />
-                      <MiniStat label="Saldo" value={saldo} color={saldo > 0 ? COLORS.accent : COLORS.muted} />
-                    </div>
-
-                    <div className="flex items-center justify-between text-xs mb-4" style={{ color: COLORS.muted }}>
-                      <span className="flex items-center gap-1.5">
-                        <Banknote size={14} /> {sale.formaPagamento}
-                      </span>
-                      <span>{sale.data && new Date(sale.data + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
-                    </div>
-
-                    {saldo > 0 && (
-                      <div className="flex flex-col sm:flex-row gap-2.5 mb-4">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={payInputs[sale.id] || ''}
-                          onChange={(e) => setPayInputs((p) => ({ ...p, [sale.id]: e.target.value }))}
-                          placeholder="Registrar novo pagamento"
-                          className="flex-1 px-4 py-2.5 rounded-xl text-sm outline-none font-mono"
-                          style={{ border: `1px solid ${COLORS.border}` }}
-                        />
-                        <input
-                          type="date"
-                          value={payDateInputs[sale.id] || new Date().toISOString().slice(0, 10)}
-                          onChange={(e) => setPayDateInputs((p) => ({ ...p, [sale.id]: e.target.value }))}
-                          className="px-4 py-2.5 rounded-xl text-sm outline-none"
-                          style={{ border: `1px solid ${COLORS.border}` }}
-                        />
-                        <button
-                          onClick={() => registerPayment(sale)}
-                          className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white"
-                          style={{ backgroundColor: COLORS.primaryDark }}
-                        >
-                          <Check size={16} /> Confirmar
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-3 pt-4 flex-wrap" style={{ borderTop: `1px solid ${COLORS.border}` }}>
-                      <button
-                        onClick={() => openEditForm(sale)}
-                        className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg"
-                        style={{ color: COLORS.ink }}
-                      >
-                        <Pencil size={15} /> Editar
-                      </button>
-
-                      <button
-                        onClick={() => gerarReciboPDF(sale, sellerInfo.label)}
-                        className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg"
-                        style={{ color: COLORS.primary }}
-                      >
-                        <Printer size={15} /> Recibo
-                      </button>
-
-                      {confirmDeleteId === sale.id ? (
-                        <div className="flex items-center gap-2.5 ml-auto">
-                          <span className="text-sm" style={{ color: COLORS.muted }}>Excluir?</span>
-                          <button onClick={() => removeSale(sale.id)} className="text-sm font-medium px-3 py-2 rounded-lg text-white" style={{ backgroundColor: COLORS.danger }}>
-                            Sim
-                          </button>
-                          <button onClick={() => setConfirmDeleteId(null)} className="text-sm font-medium px-3 py-2" style={{ color: COLORS.muted }}>
-                            Não
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setConfirmDeleteId(sale.id)}
-                          className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg ml-auto"
-                          style={{ color: COLORS.danger }}
-                        >
-                          <Trash2 size={15} /> Excluir
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
+        {/* Lista de vendas */}
+        {loaded && filtered.length === 0 && (
+          <div
+            className="text-center py-16 rounded-2xl"
+            style={{ border: `1px dashed ${COLORS.border}`, color: COLORS.muted }}
+          >
+            <Receipt size={30} className="mx-auto mb-3" style={{ color: COLORS.border }} />
+            <p className="text-sm">
+              {sales.length === 0 ? 'Nenhuma venda registrada ainda.' : 'Nenhuma venda encontrada.'}
+            </p>
+          </div>
         )}
+
+        <div className="space-y-4">
+          {filtered.map((sale) => {
+            const venda = Number(sale.valorVenda) || 0;
+            const pago = Math.min(Number(sale.valorPago) || 0, venda);
+            const saldo = venda - pago;
+            const status = statusOf(sale);
+            return (
+              <div
+                key={sale.id}
+                className="p-5 rounded-2xl"
+                style={{ backgroundColor: COLORS.surface, borderTop: `2px dashed ${COLORS.border}`, border: `1px solid ${COLORS.border}` }}
+              >
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <h3 className="font-display font-semibold text-lg leading-tight">{sale.nome}</h3>
+                  <span
+                    className="text-xs font-semibold uppercase tracking-wider px-2.5 py-1 rounded shrink-0"
+                    style={{ border: `1.5px dashed ${status.color}`, color: status.color, transform: 'rotate(-3deg)' }}
+                  >
+                    {status.label}
+                  </span>
+                </div>
+
+                {(sale.telefone || sale.endereco) && (
+                  <div className="mb-4 space-y-1.5">
+                    {sale.telefone && (
+                      <div className="flex items-center gap-2 text-sm" style={{ color: COLORS.muted }}>
+                        <Phone size={14} /> {sale.telefone}
+                      </div>
+                    )}
+                    {sale.endereco && (
+                      <div className="flex items-center gap-2 text-sm" style={{ color: COLORS.muted }}>
+                        <MapPin size={14} /> {sale.endereco}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-3 mb-4 font-mono">
+                  <MiniStat label="Venda" value={venda} />
+                  <MiniStat label="Pago" value={pago} color={COLORS.primary} />
+                  <MiniStat label="Saldo" value={saldo} color={saldo > 0 ? COLORS.accent : COLORS.muted} />
+                </div>
+
+                <div className="flex items-center justify-between text-xs mb-4" style={{ color: COLORS.muted }}>
+                  <span className="flex items-center gap-1.5">
+                    <Banknote size={14} /> {sale.formaPagamento}
+                  </span>
+                  <span>{sale.data && new Date(sale.data + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
+                </div>
+
+                {saldo > 0 && (
+                  <div className="flex flex-col sm:flex-row gap-2.5 mb-4">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={payInputs[sale.id] || ''}
+                      onChange={(e) => setPayInputs((p) => ({ ...p, [sale.id]: e.target.value }))}
+                      placeholder="Registrar novo pagamento"
+                      className="flex-1 px-4 py-2.5 rounded-xl text-sm outline-none font-mono"
+                      style={{ border: `1px solid ${COLORS.border}` }}
+                    />
+                    <button
+                      onClick={() => registerPayment(sale)}
+                      className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white"
+                      style={{ backgroundColor: COLORS.primaryDark }}
+                    >
+                      <Check size={16} /> Confirmar
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3 pt-4" style={{ borderTop: `1px solid ${COLORS.border}` }}>
+                  <button
+                    onClick={() => openEditForm(sale)}
+                    className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg"
+                    style={{ color: COLORS.ink }}
+                  >
+                    <Pencil size={15} /> Editar
+                  </button>
+
+                  {confirmDeleteId === sale.id ? (
+                    <div className="flex items-center gap-2.5 ml-auto">
+                      <span className="text-sm" style={{ color: COLORS.muted }}>Excluir?</span>
+                      <button onClick={() => removeSale(sale.id)} className="text-sm font-medium px-3 py-2 rounded-lg text-white" style={{ backgroundColor: COLORS.danger }}>
+                        Sim
+                      </button>
+                      <button onClick={() => setConfirmDeleteId(null)} className="text-sm font-medium px-3 py-2" style={{ color: COLORS.muted }}>
+                        Não
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDeleteId(sale.id)}
+                      className="flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg ml-auto"
+                      style={{ color: COLORS.danger }}
+                    >
+                      <Trash2 size={15} /> Excluir
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -1039,30 +850,9 @@ function MiniStat({ label, value, color }) {
   );
 }
 
-function ReportView({ sales, title, onBack }) {
-  const [period, setPeriod] = useState('tudo');
+function ReportView({ sales, totals, title, onBack }) {
   const now = new Date();
-
-  const filteredSales = useMemo(() => filterSalesByPeriod(sales, period), [sales, period]);
-
-  const totals = useMemo(() => {
-    let totalVendas = 0, totalRecebido = 0;
-    filteredSales.forEach((s) => {
-      const venda = Number(s.valorVenda) || 0;
-      const pago = Math.min(Number(s.valorPago) || 0, venda);
-      totalVendas += venda;
-      totalRecebido += pago;
-    });
-    return { totalVendas, totalRecebido, totalAReceber: totalVendas - totalRecebido };
-  }, [filteredSales]);
-
-  const sorted = [...filteredSales].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
-
-  const PERIODS = [
-    { key: 'tudo', label: 'Tudo' },
-    { key: 'semana', label: 'Últimos 7 dias' },
-    { key: 'mes', label: 'Últimos 30 dias' },
-  ];
+  const sorted = [...sales].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
 
   return (
     <div style={{ backgroundColor: '#EDECE6', minHeight: '100vh' }} className="font-mono py-10 px-5">
@@ -1089,24 +879,6 @@ function ReportView({ sales, title, onBack }) {
         </button>
       </div>
 
-      {/* Filtro de período */}
-      <div className="max-w-sm mx-auto no-print flex gap-2 mb-5">
-        {PERIODS.map((p) => (
-          <button
-            key={p.key}
-            onClick={() => setPeriod(p.key)}
-            className="flex-1 px-3 py-2.5 rounded-lg text-xs font-semibold"
-            style={
-              period === p.key
-                ? { backgroundColor: COLORS.primary, color: '#fff' }
-                : { backgroundColor: COLORS.surface, color: COLORS.muted, border: `1px solid ${COLORS.border}` }
-            }
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
-
       <div
         className="max-w-sm mx-auto p-7"
         style={{ backgroundColor: '#FFFFFF', border: `1px solid ${COLORS.border}` }}
@@ -1116,11 +888,6 @@ function ReportView({ sales, title, onBack }) {
           <p className="text-xs mt-2" style={{ color: COLORS.muted }}>
             Emitido em {now.toLocaleDateString('pt-BR')} às {now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
           </p>
-          {period !== 'tudo' && (
-            <p className="text-xs mt-1" style={{ color: COLORS.accent }}>
-              Período: {PERIODS.find((p) => p.key === period)?.label}
-            </p>
-          )}
         </div>
 
         <div style={{ borderTop: `1px dashed ${COLORS.border}`, borderBottom: `1px dashed ${COLORS.border}` }} className="py-4 mb-5">
@@ -1136,7 +903,7 @@ function ReportView({ sales, title, onBack }) {
 
         <div className="space-y-3 mb-5">
           {sorted.length === 0 && (
-            <p className="text-xs" style={{ color: COLORS.muted }}>Nenhuma venda registrada neste período.</p>
+            <p className="text-xs" style={{ color: COLORS.muted }}>Nenhuma venda registrada.</p>
           )}
           {sorted.map((s) => {
             const venda = Number(s.valorVenda) || 0;
