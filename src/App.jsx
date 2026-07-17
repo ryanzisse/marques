@@ -865,7 +865,6 @@ function CashDashboard({ onBack }) {
     </div>
   );
 }
-
 // ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
@@ -898,9 +897,14 @@ export default function App() {
     />;
   }
 
+  // NOVO: Se for Visão Geral
+  if (seller === 'overview') {
+    return <OverviewApp onBack={() => setSeller(null)} />;
+  }
+
+  // Se for um vendedor específico
   return <SellerApp sellerId={seller} onBack={() => setSeller(null)} />;
 }
-
 // ============================================================
 // COMPONENTE: Seleção de Vendedor (MODIFICADO)
 // ============================================================
