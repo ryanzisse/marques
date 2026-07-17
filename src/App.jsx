@@ -42,6 +42,9 @@ const COLORS = {
   dangerLight: '#F6E3DD',
 };
 
+// --- CONFIGURAÇÃO DO CAIXA ---
+const CAIXA_SENHA = '123456'; // Senha fixa para o Aldo
+
 const currency = (n) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(n) || 0);
 
@@ -221,20 +224,687 @@ const globalStyles = `
   input, select { font-family: 'Inter', system-ui, sans-serif; }
 `;
 
-export default function App() {
-  // seller: null (tela de seleção) | 'junior' | 'aldo' | 'overview'
-  const [seller, setSeller] = useState(null);
+// ============================================================
+// COMPONENTE: Tela de Senha do Caixa
+// ============================================================
+function SenhaCaixa({ onSuccess, onCancel }) {
+  const [senha, setSenha] = useState('');
+  const [erro, setErro] = useState('');
 
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (senha === CAIXA_SENHA) {
+      onSuccess();
+    } else {
+      setErro('Senha incorreta!');
+      setSenha('');
+    }
+  };
+
+  return (
+    <div style={{ backgroundColor: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-sans">
+      <style>{globalStyles}</style>
+      <div style={{ maxWidth: '400px', margin: '0 auto', padding: '80px 20px' }}>
+        <div className="text-center mb-8">
+          <div
+            style={{
+              width: '64px',
+              height: '64px',
+              borderRadius: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 16px',
+              backgroundColor: COLORS.accentLight,
+              border: `2px solid ${COLORS.accent}`,
+            }}
+          >
+            <Wallet size={32} style={{ color: COLORS.accent }} />
+          </div>
+          <h1 className="font-display text-2xl font-semibold">Dashboard de Caixa</h1>
+          <p className="text-sm mt-2" style={{ color: COLORS.muted }}>Digite a senha para acessar</p>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="mb-4">
+            <input
+              type="password"
+              value={senha}
+              onChange={(e) => setSenha(e.target.value)}
+              placeholder="Digite a senha"
+              className="w-full px-4 py-3 rounded-xl text-sm outline-none text-center"
+              style={{ border: `2px solid ${COLORS.border}`, fontSize: '18px', letterSpacing: '4px' }}
+              autoFocus
+            />
+            {erro && <p className="text-sm mt-2 text-center" style={{ color: COLORS.danger }}>{erro}</p>}
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="flex-1 py-3 rounded-xl text-sm font-semibold"
+              style={{ border: `1px solid ${COLORS.border}`, color: COLORS.muted }}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="flex-1 py-3 rounded-xl text-sm font-semibold text-white"
+              style={{ backgroundColor: COLORS.accent }}
+            >
+              Acessar
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// COMPONENTE: Dashboard de Caixa
+// ============================================================
+function CashDashboard({ onBack }) {
+  const [movimentacoes, setMovimentacoes] = useState([]);
+  const [contasPagar, setContasPagar] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [showFormMov, setShowFormMov] = useState(false);
+  const [showFormConta, setShowFormConta] = useState(false);
+  const [formMov, setFormMov] = useState({
+    tipo: 'entrada',
+    valor: '',
+    descricao: '',
+    categoria: 'Outros',
+    data: new Date().toISOString().slice(0, 10),
+  });
+  const [formConta, setFormConta] = useState({
+    descricao: '',
+    valor: '',
+    dataVencimento: new Date().toISOString().slice(0, 10),
+    status: 'pendente',
+  });
+  const [erro, setErro] = useState('');
+  const [filtro, setFiltro] = useState('todos');
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+  // Carregar dados do Supabase
+  const loadData = useCallback(async () => {
+    try {
+      // Carregar movimentações
+      const { data: movData, error: movError } = await supabase
+        .from('caixa_movimentacoes')
+        .select('*')
+        .order('data', { ascending: false });
+
+      if (movError) throw movError;
+
+      // Carregar contas a pagar
+      const { data: contaData, error: contaError } = await supabase
+        .from('caixa_contas')
+        .select('*')
+        .order('dataVencimento', { ascending: true });
+
+      if (contaError) throw contaError;
+
+      setMovimentacoes(movData || []);
+      setContasPagar(contaData || []);
+      setLoaded(true);
+    } catch (err) {
+      setErro('Erro ao carregar dados: ' + err.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Calcular saldo atual
+  const saldoAtual = useMemo(() => {
+    let saldo = 0;
+    movimentacoes.forEach((m) => {
+      if (m.tipo === 'entrada') saldo += Number(m.valor);
+      else saldo -= Number(m.valor);
+    });
+    return saldo;
+  }, [movimentacoes]);
+
+  const totalContasPagar = useMemo(() => {
+    return contasPagar
+      .filter((c) => c.status === 'pendente')
+      .reduce((acc, c) => acc + Number(c.valor), 0);
+  }, [contasPagar]);
+
+  const totalContasPagas = useMemo(() => {
+    return contasPagar
+      .filter((c) => c.status === 'pago')
+      .reduce((acc, c) => acc + Number(c.valor), 0);
+  }, [contasPagar]);
+
+  const movFiltradas = useMemo(() => {
+    if (filtro === 'todos') return movimentacoes;
+    return movimentacoes.filter((m) => m.tipo === filtro);
+  }, [movimentacoes, filtro]);
+
+  // Funções CRUD para movimentações
+  async function addMovimentacao(e) {
+    e.preventDefault();
+    const valor = parseFloat(formMov.valor);
+    if (!valor || valor <= 0) return setErro('Informe um valor válido');
+    if (!formMov.descricao.trim()) return setErro('Informe uma descrição');
+
+    const novaMov = {
+      tipo: formMov.tipo,
+      valor: valor,
+      descricao: formMov.descricao,
+      categoria: formMov.categoria,
+      data: formMov.data,
+      created_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase.from('caixa_movimentacoes').insert(novaMov);
+    if (error) return setErro('Erro ao salvar: ' + error.message);
+
+    setFormMov({
+      tipo: 'entrada',
+      valor: '',
+      descricao: '',
+      categoria: 'Outros',
+      data: new Date().toISOString().slice(0, 10),
+    });
+    setShowFormMov(false);
+    setErro('');
+    await loadData();
+  }
+
+  async function deleteMovimentacao(id) {
+    const { error } = await supabase.from('caixa_movimentacoes').delete().eq('id', id);
+    if (error) return setErro('Erro ao excluir: ' + error.message);
+    setConfirmDeleteId(null);
+    await loadData();
+  }
+
+  // Funções CRUD para contas
+  async function addConta(e) {
+    e.preventDefault();
+    const valor = parseFloat(formConta.valor);
+    if (!valor || valor <= 0) return setErro('Informe um valor válido');
+    if (!formConta.descricao.trim()) return setErro('Informe uma descrição');
+
+    const novaConta = {
+      descricao: formConta.descricao,
+      valor: valor,
+      dataVencimento: formConta.dataVencimento,
+      status: 'pendente',
+      created_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase.from('caixa_contas').insert(novaConta);
+    if (error) return setErro('Erro ao salvar: ' + error.message);
+
+    setFormConta({
+      descricao: '',
+      valor: '',
+      dataVencimento: new Date().toISOString().slice(0, 10),
+      status: 'pendente',
+    });
+    setShowFormConta(false);
+    setErro('');
+    await loadData();
+  }
+
+  async function toggleContaStatus(id, statusAtual) {
+    const novoStatus = statusAtual === 'pendente' ? 'pago' : 'pendente';
+    const { error } = await supabase
+      .from('caixa_contas')
+      .update({ status: novoStatus })
+      .eq('id', id);
+    if (error) return setErro('Erro ao atualizar: ' + error.message);
+    await loadData();
+  }
+
+  async function deleteConta(id) {
+    const { error } = await supabase.from('caixa_contas').delete().eq('id', id);
+    if (error) return setErro('Erro ao excluir: ' + error.message);
+    await loadData();
+  }
+
+  // Formatar data
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '-';
+    return new Date(dateStr + 'T00:00:00').toLocaleDateString('pt-BR');
+  };
+
+  // Categorias para seleção
+  const CATEGORIAS = ['Vendas', 'Fornecedor', 'Funcionário', 'Aluguel', 'Impostos', 'Outros'];
+
+  return (
+    <div style={{ backgroundColor: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-sans">
+      <style>{globalStyles}</style>
+      <div style={{ maxWidth: '672px', margin: '0 auto', padding: '32px 20px 128px' }}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-sm font-medium px-1 py-2"
+            style={{ color: COLORS.muted }}
+          >
+            <ArrowLeft size={18} /> Voltar
+          </button>
+          <div
+            style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              overflow: 'hidden',
+              backgroundColor: COLORS.surface,
+              border: `1px solid ${COLORS.border}`,
+            }}
+          >
+            <img src={logo} alt="Marques" style={{ width: '24px', height: '24px', objectFit: 'contain' }} />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2.5 mb-2">
+          <Wallet size={24} style={{ color: COLORS.accent }} />
+          <h1 className="font-display text-2xl font-semibold">Dashboard de Caixa</h1>
+        </div>
+        <p className="text-sm mb-7" style={{ color: COLORS.muted }}>
+          {loaded ? `${movimentacoes.length} movimentações · ${contasPagar.length} contas` : 'Carregando...'}
+        </p>
+
+        {erro && (
+          <div className="mb-5 text-sm px-4 py-3 rounded-xl" style={{ backgroundColor: COLORS.dangerLight, color: COLORS.danger }}>
+            {erro}
+          </div>
+        )}
+
+        {/* Resumo */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-7">
+          <StatCard
+            icon={<Wallet size={18} />}
+            label="Saldo Atual"
+            value={saldoAtual}
+            color={saldoAtual >= 0 ? COLORS.primary : COLORS.danger}
+          />
+          <StatCard
+            icon={<Clock size={18} />}
+            label="Contas a Pagar"
+            value={totalContasPagar}
+            color={COLORS.danger}
+          />
+          <StatCard
+            icon={<Check size={18} />}
+            label="Contas Pagas"
+            value={totalContasPagas}
+            color={COLORS.primary}
+          />
+        </div>
+
+        {/* Botões de ação rápida */}
+        <div className="flex flex-wrap gap-3 mb-6">
+          <button
+            onClick={() => setShowFormMov(true)}
+            className="flex-1 min-w-[140px] flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-sm font-semibold text-white"
+            style={{ backgroundColor: COLORS.primary }}
+          >
+            <Plus size={18} /> Nova Entrada
+          </button>
+          <button
+            onClick={() => {
+              setFormMov({ ...formMov, tipo: 'saida' });
+              setShowFormMov(true);
+            }}
+            className="flex-1 min-w-[140px] flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-sm font-semibold text-white"
+            style={{ backgroundColor: COLORS.danger }}
+          >
+            <Plus size={18} /> Nova Saída
+          </button>
+          <button
+            onClick={() => setShowFormConta(true)}
+            className="flex-1 min-w-[140px] flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-sm font-semibold"
+            style={{ border: `1.5px dashed ${COLORS.accent}`, color: COLORS.accent }}
+          >
+            <Receipt size={18} /> Nova Conta
+          </button>
+        </div>
+
+        {/* Formulário de Movimentação */}
+        {showFormMov && (
+          <form onSubmit={addMovimentacao} className="mb-6 p-5 rounded-2xl" style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.border}` }}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-display font-semibold">
+                {formMov.tipo === 'entrada' ? 'Nova Entrada' : 'Nova Saída'}
+              </h3>
+              <button type="button" onClick={() => { setShowFormMov(false); setErro(''); }} style={{ color: COLORS.muted }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Tipo">
+                  <select
+                    value={formMov.tipo}
+                    onChange={(e) => setFormMov({ ...formMov, tipo: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl text-sm outline-none bg-white"
+                    style={{ border: `1px solid ${COLORS.border}` }}
+                  >
+                    <option value="entrada">Entrada</option>
+                    <option value="saida">Saída</option>
+                  </select>
+                </Field>
+                <Field label="Data">
+                  <input
+                    type="date"
+                    value={formMov.data}
+                    onChange={(e) => setFormMov({ ...formMov, data: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+                    style={{ border: `1px solid ${COLORS.border}` }}
+                  />
+                </Field>
+              </div>
+
+              <Field label="Valor (R$)">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formMov.valor}
+                  onChange={(e) => setFormMov({ ...formMov, valor: e.target.value })}
+                  className="w-full px-4 py-3 rounded-xl text-sm outline-none font-mono"
+                  style={{ border: `1px solid ${COLORS.border}` }}
+                  placeholder="0,00"
+                  autoFocus
+                />
+              </Field>
+
+              <Field label="Descrição">
+                <input
+                  value={formMov.descricao}
+                  onChange={(e) => setFormMov({ ...formMov, descricao: e.target.value })}
+                  className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+                  style={{ border: `1px solid ${COLORS.border}` }}
+                  placeholder="Ex: Venda #123, Material, etc."
+                />
+              </Field>
+
+              <Field label="Categoria">
+                <select
+                  value={formMov.categoria}
+                  onChange={(e) => setFormMov({ ...formMov, categoria: e.target.value })}
+                  className="w-full px-4 py-3 rounded-xl text-sm outline-none bg-white"
+                  style={{ border: `1px solid ${COLORS.border}` }}
+                >
+                  {CATEGORIAS.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </Field>
+
+              <button
+                type="submit"
+                className="w-full py-3.5 rounded-xl text-sm font-semibold text-white"
+                style={{ backgroundColor: formMov.tipo === 'entrada' ? COLORS.primary : COLORS.danger }}
+              >
+                Lançar {formMov.tipo === 'entrada' ? 'Entrada' : 'Saída'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Formulário de Conta */}
+        {showFormConta && (
+          <form onSubmit={addConta} className="mb-6 p-5 rounded-2xl" style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.border}` }}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-display font-semibold">Nova Conta a Pagar</h3>
+              <button type="button" onClick={() => { setShowFormConta(false); setErro(''); }} style={{ color: COLORS.muted }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <Field label="Descrição">
+                <input
+                  value={formConta.descricao}
+                  onChange={(e) => setFormConta({ ...formConta, descricao: e.target.value })}
+                  className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+                  style={{ border: `1px solid ${COLORS.border}` }}
+                  placeholder="Ex: Aluguel, Fornecedor, etc."
+                  autoFocus
+                />
+              </Field>
+
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Valor (R$)">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={formConta.valor}
+                    onChange={(e) => setFormConta({ ...formConta, valor: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl text-sm outline-none font-mono"
+                    style={{ border: `1px solid ${COLORS.border}` }}
+                    placeholder="0,00"
+                  />
+                </Field>
+                <Field label="Vencimento">
+                  <input
+                    type="date"
+                    value={formConta.dataVencimento}
+                    onChange={(e) => setFormConta({ ...formConta, dataVencimento: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+                    style={{ border: `1px solid ${COLORS.border}` }}
+                  />
+                </Field>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-3.5 rounded-xl text-sm font-semibold text-white"
+                style={{ backgroundColor: COLORS.accent }}
+              >
+                Adicionar Conta
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Tabs para alternar entre movimentações e contas */}
+        <div className="flex gap-2 mb-4 border-b" style={{ borderColor: COLORS.border }}>
+          <button
+            onClick={() => setFiltro('todos')}
+            className={`px-4 py-2.5 text-sm font-medium transition-all ${filtro === 'todos' ? 'border-b-2' : ''}`}
+            style={{
+              borderColor: filtro === 'todos' ? COLORS.primary : 'transparent',
+              color: filtro === 'todos' ? COLORS.ink : COLORS.muted,
+            }}
+          >
+            Todas
+          </button>
+          <button
+            onClick={() => setFiltro('entrada')}
+            className={`px-4 py-2.5 text-sm font-medium transition-all ${filtro === 'entrada' ? 'border-b-2' : ''}`}
+            style={{
+              borderColor: filtro === 'entrada' ? COLORS.primary : 'transparent',
+              color: filtro === 'entrada' ? COLORS.ink : COLORS.muted,
+            }}
+          >
+            Entradas
+          </button>
+          <button
+            onClick={() => setFiltro('saida')}
+            className={`px-4 py-2.5 text-sm font-medium transition-all ${filtro === 'saida' ? 'border-b-2' : ''}`}
+            style={{
+              borderColor: filtro === 'saida' ? COLORS.primary : 'transparent',
+              color: filtro === 'saida' ? COLORS.ink : COLORS.muted,
+            }}
+          >
+            Saídas
+          </button>
+        </div>
+
+        {/* Lista de Movimentações */}
+        <div className="space-y-3 mb-6">
+          <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: COLORS.muted }}>
+            Últimas Movimentações ({movFiltradas.length})
+          </p>
+          {movFiltradas.length === 0 && (
+            <div className="text-center py-8 rounded-2xl" style={{ border: `1px dashed ${COLORS.border}`, color: COLORS.muted }}>
+              <p className="text-sm">Nenhuma movimentação encontrada</p>
+            </div>
+          )}
+          {movFiltradas.slice(0, 20).map((mov) => (
+            <div
+              key={mov.id}
+              className="p-4 rounded-2xl flex items-center justify-between"
+              style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.border}` }}
+            >
+              <div className="flex-1">
+                <div className="flex items-center gap-3 mb-1">
+                  <span
+                    className="text-xs font-semibold px-2 py-0.5 rounded"
+                    style={{
+                      backgroundColor: mov.tipo === 'entrada' ? COLORS.primaryLight : COLORS.dangerLight,
+                      color: mov.tipo === 'entrada' ? COLORS.primary : COLORS.danger,
+                    }}
+                  >
+                    {mov.tipo === 'entrada' ? '+' : '-'}
+                  </span>
+                  <span className="font-medium text-sm">{mov.descricao}</span>
+                  <span className="text-xs ml-auto" style={{ color: COLORS.muted }}>{formatDate(mov.data)}</span>
+                </div>
+                <div className="flex items-center gap-3 text-xs" style={{ color: COLORS.muted }}>
+                  <span>Categoria: {mov.categoria}</span>
+                  <span className="font-mono font-semibold" style={{ color: mov.tipo === 'entrada' ? COLORS.primary : COLORS.danger }}>
+                    {currency(mov.valor)}
+                  </span>
+                </div>
+              </div>
+              {confirmDeleteId === mov.id ? (
+                <div className="flex items-center gap-2 ml-3">
+                  <button onClick={() => deleteMovimentacao(mov.id)} className="text-xs font-medium px-2 py-1 rounded text-white" style={{ backgroundColor: COLORS.danger }}>Sim</button>
+                  <button onClick={() => setConfirmDeleteId(null)} className="text-xs font-medium px-2 py-1" style={{ color: COLORS.muted }}>Não</button>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmDeleteId(mov.id)} style={{ color: COLORS.muted }} className="p-1">
+                  <Trash2 size={16} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Lista de Contas a Pagar - VERSÃO CORRIGIDA */}
+        <div className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: COLORS.muted }}>
+            Contas a Pagar ({contasPagar.length})
+          </p>
+          {contasPagar.length === 0 && (
+            <div className="text-center py-8 rounded-2xl" style={{ border: `1px dashed ${COLORS.border}`, color: COLORS.muted }}>
+              <p className="text-sm">Nenhuma conta cadastrada</p>
+            </div>
+          )}
+          {contasPagar.map((conta) => (
+            <div
+              key={conta.id}
+              className="p-4 rounded-2xl"
+              style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.border}` }}
+            >
+              {/* Linha 1: Status + Descrição + Valor */}
+              <div className="flex items-center gap-2 mb-2">
+                <span
+                  className="text-xs font-semibold px-2 py-0.5 rounded shrink-0"
+                  style={{
+                    backgroundColor: conta.status === 'pago' ? COLORS.primaryLight : COLORS.dangerLight,
+                    color: conta.status === 'pago' ? COLORS.primary : COLORS.danger,
+                  }}
+                >
+                  {conta.status === 'pago' ? '✓ Pago' : 'Pendente'}
+                </span>
+                <span className="font-medium text-sm flex-1 truncate">{conta.descricao}</span>
+                <span className="font-mono font-semibold text-sm shrink-0" style={{ color: COLORS.ink }}>
+                  {currency(conta.valor)}
+                </span>
+              </div>
+
+              {/* Linha 2: Vencimento + Botões */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs" style={{ color: COLORS.muted }}>
+                  Vence: {formatDate(conta.dataVencimento)}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => toggleContaStatus(conta.id, conta.status)}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg transition-all hover:opacity-80"
+                    style={{
+                      backgroundColor: conta.status === 'pendente' ? COLORS.primary : COLORS.accentLight,
+                      color: conta.status === 'pendente' ? '#FFFFFF' : COLORS.accent,
+                    }}
+                  >
+                    {conta.status === 'pendente' ? 'Pagar' : 'Desfazer'}
+                  </button>
+                  <button
+                    onClick={() => deleteConta(conta.id)}
+                    style={{ color: COLORS.muted }}
+                    className="p-1 hover:opacity-60 transition-opacity"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// COMPONENTE PRINCIPAL
+// ============================================================
+export default function App() {
+  const [seller, setSeller] = useState(null);
+  const [showCaixa, setShowCaixa] = useState(false);
+  const [showSenha, setShowSenha] = useState(false);
+
+  // Se estiver no dashboard do caixa
+  if (showCaixa) {
+    return <CashDashboard onBack={() => setShowCaixa(false)} />;
+  }
+
+  // Se estiver na tela de senha
+  if (showSenha) {
+    return <SenhaCaixa
+      onSuccess={() => {
+        setShowSenha(false);
+        setShowCaixa(true);
+      }}
+      onCancel={() => setShowSenha(false)}
+    />;
+  }
+
+  // Se não tiver vendedor selecionado
   if (!seller) {
-    return <SellerSelect onSelect={setSeller} />;
+    return <SellerSelect
+      onSelect={setSeller}
+      onCaixa={() => setShowSenha(true)}
+    />;
   }
-  if (seller === 'overview') {
-    return <OverviewApp onBack={() => setSeller(null)} />;
-  }
+
   return <SellerApp sellerId={seller} onBack={() => setSeller(null)} />;
 }
 
-function SellerSelect({ onSelect }) {
+// ============================================================
+// COMPONENTE: Seleção de Vendedor (MODIFICADO)
+// ============================================================
+function SellerSelect({ onSelect, onCaixa }) {
   return (
     <div style={{ backgroundColor: COLORS.bg, color: COLORS.ink, minHeight: '100vh' }} className="font-sans">
       <style>{globalStyles}</style>
@@ -302,15 +972,35 @@ function SellerSelect({ onSelect }) {
               <div className="text-xs" style={{ color: COLORS.muted }}>Total combinado dos dois vendedores</div>
             </div>
           </button>
+
+          {/* Botão do Dashboard de Caixa - NOVO */}
+          <div className="mt-6 pt-6" style={{ borderTop: `1px solid ${COLORS.border}` }}>
+            <button
+              onClick={onCaixa}
+              className="w-full flex items-center gap-4 px-5 py-5 rounded-2xl text-left transition-transform active:scale-[0.98]"
+              style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.border}` }}
+            >
+              <div
+                className="w-12 h-12 rounded-full flex items-center justify-center shrink-0"
+                style={{ backgroundColor: COLORS.accentLight, color: COLORS.accent }}
+              >
+                <Wallet size={20} />
+              </div>
+              <div className="flex-1">
+                <div className="font-display font-semibold text-base">Dashboard de Caixa</div>
+                <div className="text-xs" style={{ color: COLORS.muted }}>Gerenciar entradas, saídas e contas a pagar</div>
+              </div>
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// App de um único vendedor
-// ---------------------------------------------------------------------------
+// ============================================================
+// COMPONENTE: App de um único vendedor
+// ============================================================
 function SellerApp({ sellerId, onBack }) {
   const sellerInfo = SELLERS.find((s) => s.id === sellerId);
   const tableName = sellerInfo.table;
@@ -848,9 +1538,9 @@ function SellerApp({ sellerId, onBack }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Visão Geral (Junior + Aldo combinados) — somente leitura / resumo
-// ---------------------------------------------------------------------------
+// ============================================================
+// COMPONENTE: Visão Geral (Junior + Aldo combinados)
+// ============================================================
 function OverviewApp({ onBack }) {
   const [loaded, setLoaded] = useState(false);
   const [bySeller, setBySeller] = useState({});
@@ -1001,6 +1691,9 @@ function OverviewApp({ onBack }) {
   );
 }
 
+// ============================================================
+// COMPONENTES AUXILIARES
+// ============================================================
 function Field({ label, children }) {
   return (
     <label className="block">
